@@ -9,6 +9,19 @@ STDLIB_NAME = 'Swift'
 
 IsVariadic = Enum('IsVariadic', 'YES NO')
 
+class FunctionSigSpecializationParamKind():
+    CONSTANT_PROP_FUNCTION = 0
+    CONSTANT_PROP_GLOBAL = 1
+    CONSTANT_PROP_INTEGER = 2
+    CONSTANT_PROP_FLOAT = 3
+    CONSTANT_PROP_STRING = 4
+    CLOSURE_PROP = 5
+    BOX_TO_VALUE = 6
+    BOX_TO_STACK = 7
+    DEAD = 1 << 6
+    OWNED_TO_GUARANTEED = 1 << 7
+    SROA = 1 << 8
+
 class NameSource():
     def __init__(self, text):
         self.text = text
@@ -59,9 +72,23 @@ class OldDemangler():
 
         top_level = Node(Kind.GLOBAL)
 
+        # Specialization prefixes
         if self.mangled.nextIf('TS'):
-            print('TODO: implement demangleSpecializedAttribute')
-            return None
+            node = self.demangleSpecializedAttribute()
+            if not node:
+                return None
+            top_level.addChild(node)
+            self.substitutions = []
+
+            while self.mangled.nextIf('_TTS'):
+                node = self.demangleSpecializedAttribute()
+                if not node:
+                    return None
+                top_level.addChild(node)
+                self.substitutions = []
+
+            if not self.mangled.nextIf('_T'):
+                return None
         elif self.mangled.nextIf('To'):
             top_level.addChild(Node(Kind.OBJC_ATTRIBUTE))
         elif self.mangled.nextIf('TO'):
@@ -79,7 +106,7 @@ class OldDemangler():
         top_level.addChild(node)
 
         if not self.mangled.isEmpty():
-            top_level.addChild(Node(Kind.SUFFIX, self.mangled.getString()))
+            top_level.addChild(Node(Kind.SUFFIX, text=self.mangled.getString()))
 
         return top_level
 
@@ -100,41 +127,173 @@ class OldDemangler():
             else:
                 s += self.mangled.next()
 
-
     def demangleGlobal(self):
         print('demangleGlobal({})'.format(self.mangled.text))
         if not self.mangled:
             return None
 
+        # Type metadata
         if self.mangled.nextIf('M'):
-            print('TODO: implement metadata')
-            return None
+            if self.mangled.nextIf('P'):
+                pattern = Node(Kind.GENERIC_TYPE_METADATA_PATTERN)
+                node = self.demangleType()
+                if not node:
+                    return None
+                pattern.addChild(node)
+                return pattern
+            if self.mangled.nextIf('a'):
+                accessor = Node(Kind.TYPE_METADATA_ACCESS_FUNCTION)
+                node = self.demangleType()
+                if not node:
+                    return None
+                accessor.addChild(node)
+                return accessor
+            if self.mangled.nextIf('L'):
+                cache = Node(Kind.TYPE_METADATA_LAZY_CACHE)
+                node = self.demangleType()
+                if not node:
+                    return None
+                cache.addChild(node)
+                return cache
+            if self.mangled.nextIf('m'):
+                metaclass = Node(Kind.METACLASS)
+                node = self.demangleType()
+                if not node:
+                    return None
+                metaclass.addChild(node)
+                return metaclass
+            if self.mangled.nextIf('n'):
+                nominal_type = Node(Kind.NOMINAL_TYPE_DESCRIPTOR)
+                node = self.demangleType()
+                if not node:
+                    return None
+                nominal_type.addChild(node)
+                return nominal_type
+            if self.mangled.nextIf('f'):
+                metadata = Node(Kind.FULL_TYPE_METADATA)
+                node = self.demangleType()
+                if not node:
+                    return None
+                metadata.addChild(node)
+                return metadata
+            if self.mangled.nextIf('p'):
+                metadata = Node(Kind.PROTOCOL_DESCRIPTOR)
+                node = self.demangleType()
+                if not node:
+                    return None
+                metadata.addChild(node)
+                return metadata
+            metadata = Node(Kind.TYPE_METADATA)
+            node = self.demangleType()
+            if not node:
+                return None
+            metadata.addChild(node)
+            return metadata
 
+        # Partial application thunks
         if self.mangled.nextIf('PA'):
             print('TODO: implement partial application thunks')
             return None
 
+        # Top-level types
         if self.mangled.nextIf('t'):
             print('TODO: implement top level types for consumers')
             return None
 
+        # Value witnesses
         if self.mangled.nextIf('w'):
             print('TODO: implement value witnesses')
             return None
 
+        # Offsets, value witness tables, and protocol witnesses
         if self.mangled.nextIf('W'):
             print('TODO: implement offsets value witness tables and protocol witnesses')
             return None
 
-        if self.mangled.nextIf('W'):
+        # Other thunks
+        if self.mangled.nextIf('T'):
             print('TODO: implement other thunks')
             return None
 
-        #ret = self.demangleEntity()
-        #if not ret:
-        #    print('demangleEntity() returned None with suffix={}'.format(self.mangled.text))
-        #return ret
         return self.demangleEntity()
+
+    def demangleGenericSpecialization(self, specialization):
+        while not self.mangled.nextIf('_'):
+            param = Node(Kind.GENERIC_SPECIALIZATION_PARAM)
+            node = self.demangleType()
+            if not node:
+                return None
+            param.addChild(node)
+
+            while not self.mangled.nextIf('_'):
+                node = self.demangleProtocolConformance()
+                if not node:
+                    return None
+                param.addChild(node)
+            specialization.addChild(param)
+
+        return specialization
+
+    def demangleFunctionSignatureSpecialization(self, specialization):
+        param_count = 0
+        while not self.mangled.nextIf('_'):
+            param = Node(Kind.FUNCTION_SIGNATURE_SPECIALIZATION_PARAM, index=param_count)
+            if self.mangled.nextIf('n_'):
+                pass
+            elif self.mangled.nextIf('cp'):
+                if not self.demangleFuncSigSpecializationConstantProp(param):
+                    return None
+            elif self.mangled.nextIf('cl'):
+                if not self.demangleFuncSigSpecializationClosureProp(param):
+                    return None
+            elif self.mangled.nextIf('i_'):
+                result =  Node(Kind.FUNCTION_SIGNATURE_SPECIALIZATION_PARAM_KIND, index=FunctionSigSpecializationParamKind.BOX_TO_VALUE)
+                if not result:
+                    return None
+                param.addChild(result)
+            elif self.mangled.nextIf('k_'):
+                result =  Node(Kind.FUNCTION_SIGNATURE_SPECIALIZATION_PARAM_KIND, index=FunctionSigSpecializationParamKind.BOX_TO_STACK)
+                if not result:
+                    return None
+                param.addChild(result)
+            else:
+                value = 0
+                if self.mangled.nextIf('d'):
+                    value = value | FunctionSigSpecializationParamKind.DEAD
+                if self.mangled.nextIf('g'):
+                    value = value | FunctionSigSpecializationParamKind.OWNED_TO_GUARANTEED
+                if self.mangled.nextIf('s'):
+                    value = value | FunctionSigSpecializationParamKind.SROA
+                if not self.mangled.nextIf('_'):
+                    return None
+                if not value:
+                    return None
+
+                result = Node(Kind.FUNCTION_SIGNATURE_SPECIALIZATION_PARAM_KIND, index=value)
+                if not result:
+                    return None
+                param.addChild(result)
+
+            specialization.addChild(param)
+            param_count += 1
+
+        return specialization
+
+    def demangleProtocolConformance(self):
+        t = self.demangleType()
+        if not t:
+            return None
+        protocol = self.demangleProtocolName()
+        if not protocol:
+            return None
+        context = self.demangleContext()
+        if not context:
+            return None
+        proto_conformance = Node(Kind.PROTOCOL_CONFORMANCE)
+        proto_conformance.addChild(t)
+        proto_conformance.addChild(protocol)
+        proto_conformance.addChild(context)
+        return proto_conformance
 
     def demangleEntity(self):
         print('demangleEntity({})'.format(self.mangled.text))
@@ -149,15 +308,10 @@ class OldDemangler():
         elif self.mangled.nextIf('i'):
             entity_basic_kind = Node(Kind.SUBSCRIPT)
         else:
-            #ret = self.demangleNominalType()
-            #if not ret:
-            #    print('demangleNominalType() returned None with suffix={}'.format(self.mangled.text))
-            #return ret
             return self.demangleNominalType()
 
         context = self.demangleContext()
         if not context:
-            #print('demangleContext() returned None with suffix={}'.format(self.mangled.text))
             return None
 
         has_type = True
@@ -324,6 +478,32 @@ class OldDemangler():
         result.addChild(args)
         return result
 
+    def demangleSpecializedAttribute(self):
+        is_not_re_abstracted = False
+        if self.mangled.nextIf('g') or (self.mangled.peek() == 'r'):
+            is_not_re_abstracted = self.mangled.nextIf('r')
+            kind = Kind.GENERIC_SPECIALIZATION_NOT_RE_ABSTRACTED if is_not_re_abstracted else Kind.GENERIC_SPECIALIZATION
+            spec = Node(kind)
+
+            if self.mangled.nextIf('q'):
+                spec.addChild(Node(Kind.SPECIALIZATION_IS_FRAGILE))
+
+            spec.addChild(Node(Kind.SPECIALIZATION_PASS_ID, index=int(self.mangled.next)))
+
+            return self.demangleGenericSpecialization(spec)
+
+        if self.mangled.nextIf('f'):
+            spec = Node(Kind.FUNCTION_SIGNATURE_SPECIALIZATION)
+
+            if self.mangled.nextIf('q'):
+                spec.addChild(Node(Kind.SPECIALIZATION_IS_FRAGILE))
+
+            spec.addChild(Node(Kind.SPECIALIZATION_PASS_ID, index=int(self.mangled.next())))
+
+            return self.demangleFunctionSignatureSpecialization(spec)
+
+        return None
+
     def demangleDeclName(self):
         print('demangleDeclName({})'.format(self.mangled.text))
         if self.mangled.nextIf('L'):
@@ -421,13 +601,13 @@ class OldDemangler():
         success, index = self.demangleIndex()
         if not success:
             return None
-        return Node(kind, index)
+        return Node(kind, index=index)
 
     def createSwiftType(self, type_kind, name):
         print('createSwiftType({})'.format(name))
         t = Node(type_kind)
-        t.addChild(Node(Kind.MODULE, STDLIB_NAME))
-        t.addChild(Node(Kind.IDENTIFIER, name))
+        t.addChild(Node(Kind.MODULE, text=STDLIB_NAME))
+        t.addChild(Node(Kind.IDENTIFIER, text=name))
         return t
 
     def demangleSubstitutionIndex(self):
@@ -435,9 +615,9 @@ class OldDemangler():
         if not self.mangled:
             return None
         if self.mangled.nextIf('o'):
-            return Node(Kind.MODULE, MANGLING_MODULE_OBJC)
+            return Node(Kind.MODULE, text=MANGLING_MODULE_OBJC)
         if self.mangled.nextIf('C'):
-            return Node(Kind.MODULE, MANGLING_MODULE_C)
+            return Node(Kind.MODULE, text=MANGLING_MODULE_C)
         if self.mangled.nextIf('a'):
             return self.createSwiftType(Kind.STRUCTURE, 'Array')
         if self.mangled.nextIf('b'):
@@ -533,7 +713,7 @@ class OldDemangler():
             return self.demangleProtocolNameGivenContext(sub)
 
         if self.mangled.nextIf('s'):
-            stdlib = Node(Kind.MODULE, STDLIB_NAME)
+            stdlib = Node(Kind.MODULE, text=STDLIB_NAME)
             return self.demangleProtocolNameGivenContext(stdlib)
 
         return self.demangleDeclaratioinName(Kind.PROTOCOL)
@@ -541,7 +721,7 @@ class OldDemangler():
     def demangleModule(self):
         print('demangleModule({})'.format(self.mangled.text))
         if self.mangled.nextIf('s'):
-            return Node(Kind.MODULE, STDLIB_NAME)
+            return Node(Kind.MODULE, text=STDLIB_NAME)
         if self.mangled.nextIf('S'):
             module = self.demangleSubstitutionIndex()
             if not module:
@@ -599,7 +779,7 @@ class OldDemangler():
         if self.mangled.nextIf('S'):
             return self.demangleSubstitutionIndex()
         if self.mangled.nextIf('s'):
-            return Node(Kind.MODULE, STDLIB_NAME)
+            return Node(Kind.MODULE, text=STDLIB_NAME)
         if self.mangled.nextIf('G'):
             print('TODO: implement demangleBoundGenericType()')
             return None
@@ -696,10 +876,10 @@ class OldDemangler():
                 return None
             c = self.mangled.next()
             if c == 'b':
-                return Node(Kind.BUILTIN_TYPE_NAME, "Builtin.BridgeObject")
+                return Node(Kind.BUILTIN_TYPE_NAME, text="Builtin.BridgeObject")
 
             if c == 'B':
-                return Node(Kind.BUILTIN_TYPE_NAME, "Builtin.UnsafeValueBuffer")
+                return Node(Kind.BUILTIN_TYPE_NAME, text="Builtin.UnsafeValueBuffer")
 
             if c == 'f':
                 print('TODO: implement demangleBuiltinSize(size)')
@@ -725,13 +905,13 @@ class OldDemangler():
                         print('TODO: implement DemanglerPrinter()')
                         return None
             if c == 'O':
-                return Node(Kind.BUILTIN_TYPE_NAME, 'Builtin.UnknownObject')
+                return Node(Kind.BUILTIN_TYPE_NAME, text='Builtin.UnknownObject')
             if c == 'o':
-                return Node(Kind.BUILTIN_TYPE_NAME, 'Builtin.NativeObject')
+                return Node(Kind.BUILTIN_TYPE_NAME, text='Builtin.NativeObject')
             if c == 'p':
-                return Node(Kind.BUILTIN_TYPE_NAME, 'Builtin.RawPointer')
+                return Node(Kind.BUILTIN_TYPE_NAME, text='Builtin.RawPointer')
             if c == 'w':
-                return Node(Kind.BUILTIN_TYPE_NAME, 'Builtin.Word')
+                return Node(Kind.BUILTIN_TYPE_NAME, text='Builtin.Word')
             return None
 
         if c == 'a':
@@ -753,7 +933,7 @@ class OldDemangler():
             if not self.mangled.nextIf('R'):
                 return None
             # TODO: std::string() is unusual
-            return Node(Kind.ERROR_TYPE, "")
+            return Node(Kind.ERROR_TYPE, text="")
         if c == 'F':
             return self.demangleFunctionType(Kind.FUNCTION_TYPE)
         if c == 'f':
