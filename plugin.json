@@ -1,0 +1,21 @@
+{
+	"plugin": {
+		"name": "Objective-C and Swift Tools",
+		"type": ["core", "ui", "architecture", "binaryview"],
+		"api": "python2",
+		"description": "A collection of helper functions for reversing Mach-O files compiled from Objective-C and/or Swift",
+		"longdescription": "This plugin is currently a partially completed mess. Needed to make the first commit at some point.\n\nCan automatically parse class structures and rename function symbols to use their method names.\nUsing the Objective-C runtime implementation at https://opensource.apple.com/source/objc4/objc4-709/ as a reference.\n\nCan demangle imported Swift symbols and comment their occurences in a function.\nUsing the Swift demangler implementation at https://github.com/apple/swift/ as a reference.\n\n",
+		"license": {
+			"name": "MIT",
+			"text": "Copyright (c) 2017 Kevin Watson\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE."
+		},
+                "dependencies": {
+                    "pip": ["enum34"]
+                },
+		"version": "0.1",
+		"author": "Kevin Watson",
+		"minimumBinaryNinjaVersion": {
+			"release": "1.0.776"
+		}
+	}
+}
