@@ -216,7 +216,29 @@ class OldDemangler():
 
         # Other thunks
         if self.mangled.nextIf('T'):
-            print('TODO: implement other thunks')
+            if self.mangled.nextIf('R'):
+                thunk = Node(Kind.REABSTRACTION_THUNK_HELPER)
+                success, thunk = self.demangleReabstractSignature(thunk)
+                if not success:
+                    return None
+                return thunk
+            if self.mangled.nextIf('r'):
+                thunk = Node(Kind.REABSTRACTION_THUNK)
+                success, thunk = self.demangleReabstractSignature(thunk)
+                if not success:
+                    return None
+                return thunk
+            if self.mangled.nextIf('W'):
+                thunk = Node(Kind.PROTOCOL_WITNESS)
+                node = self.demangleProtocolConformance()
+                if not node:
+                    return None
+                thunk.addChild(node)
+                node = self.demangleEntity()
+                if not node:
+                    return None
+                thunk.addChild(node)
+                return thunk
             return None
 
         return self.demangleEntity()
@@ -974,11 +996,9 @@ class OldDemangler():
         if c == 'x':
             return self.getDependentGenericParamType(0, 0)
         if c == 'w':
-            print('TODO: implement demangleAssociatedTypeSimple')
-            return None
+            return self.demangleAssociatedTypeSimple()
         if c == 'W':
-            print('TODO: implement demangleAssociatedTypeCompound')
-            return None
+            return self.demangleAssociatedTypeCompound()
         if c == 'R':
             inout = Node(Kind.IN_OUT)
             t = self.demangleTypeImpl()
@@ -1034,6 +1054,25 @@ class OldDemangler():
         if isStartOfNominalType(c):
             return self.demangleDeclarationName(nominalTypeMarkerToNodeKind(c))
         return None
+
+    def demangleReabstractSignature(self, signature):
+        if self.mangled.nextIf('G'):
+            generics = self.demangleGenericSignature()
+            if not generics:
+                return False, signature
+            signature.addChild(generics)
+
+        src_type = self.demangleType()
+        if not src_type:
+            return False, signature
+        signature.addChild(src_type)
+
+        dest_type = self.demangleType()
+        if not dest_type:
+            return False, signature
+        signature.addChild(dest_type)
+
+        return True, signature
 
     def getDependentGenericParamType(self, depth, index):
         print_name = archetypeName(index, depth)
