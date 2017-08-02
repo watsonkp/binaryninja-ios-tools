@@ -211,7 +211,103 @@ class OldDemangler():
 
         # Offsets, value witness tables, and protocol witnesses
         if self.mangled.nextIf('W'):
-            print('TODO: implement offsets value witness tables and protocol witnesses')
+            if self.mangled.nextIf('V'):
+                witness_table = Node(Kind.VALUE_WITNESS_TABLE)
+                node = self.demangleType()
+                if not node:
+                    return None
+                witness_table.addChild(node)
+                return witness_table
+            if self.mangled.nextIf('v'):
+                field_offset = Node(Kind.FIELD_OFFSET)
+                kind = self.demangleDirectness()
+                if not kind:
+                    return None
+                field_offset.addChild(Node(kind))
+                print('WARNING: weird parsing is happending with a demangleDirectness() call')
+                # TODO: seems to take the Directness enum as an index, which is weird
+                #field_offset.addChild(Node(kind, index=kind))
+                node = self.demangleEntity()
+                if not node:
+                    return None
+                field_offset.addChild(node)
+                return field_offset
+            if self.mangled.nextIf('P'):
+                witness_table = Node(Kind.PROTOCOL_WITNESS_TABLE)
+                node = self.demangleProtocolConformance()
+                if not node:
+                    return None
+                witness_table.addChild(node)
+                return witness_table
+            if self.mangled.nextIf('G'):
+                witness_table = Node(Kind.GENERIC_PROTOCOL_WITNESS_TABLE)
+                node = self.demangleProtocolConformance()
+                if not node:
+                    return None
+                witness_table.addChild(node)
+                return witness_table
+            if self.mangled.nextIf('I'):
+                witness_table = Node(Kind.GENERIC_PROTOCOL_WITNESS_TABLE_INSTANTIATION_FUNCTION)
+                node = self.demangleProtocolConformance()
+                if not node:
+                    return None
+                witness_table.addChild(node)
+                return witness_table
+            if self.mangled.nextIf('l'):
+                accessor = Node(Kind.LAZY_PROTOCOL_WITNESS_TABLE_ACCESSOR)
+                node = self.demangleType()
+                if not node:
+                    return None
+                accessor.addChild(node)
+                node = self.demangleProtocolConformance()
+                if not node:
+                    return None
+                accessor.addChild(node)
+                return accessor
+            if self.mangled.nextIf('L'):
+                accessor = Node(Kind.LAZY_PROTOCOL_WITNESS_TABLE_CACHE_VARIABLE)
+                node = self.demangleType()
+                if not node:
+                    return None
+                accessor.addChild(node)
+                node = self.demangleProtocolConformance()
+                if not node:
+                    return None
+                accessor.addChild(node)
+                return accessor
+            if self.mangled.nextIf('a'):
+                table_template = Node(Kind.PROTOCOL_WITNESS_TABLE_ACCESSOR)
+                node = self.demangleProtocolConformance()
+                if not node:
+                    return None
+                table_template.addChild(node)
+                return table_template
+            if self.mangled.nextIf('t'):
+                accessor = Node(Kind.ASSOCIATED_TYPE_METADATA_ACCESSOR)
+                node = self.demangleProtocolConformance()
+                if not node:
+                    return None
+                accessor.addChild(node)
+                node = self.demangleDeclName()
+                if not node:
+                    return None
+                accessor.addChild(node)
+                return accessor
+            if self.mangled.nextIf('T'):
+                accessor = Node(Kind.ASSOCIATED_TYPE_WITNESS_TABLE_ACCESSOR)
+                node = self.demangleProtocolConformance()
+                if not node:
+                    return None
+                accessor.addChild(node)
+                node = self.demangleDeclName()
+                if not node:
+                    return None
+                accessor.addChild(node)
+                node = self.demangleProtocolName()
+                if not node:
+                    return None
+                accessor.addChild(node)
+                return accessor
             return None
 
         # Other thunks
@@ -244,6 +340,7 @@ class OldDemangler():
         return self.demangleEntity()
 
     def demangleGenericSpecialization(self, specialization):
+        print('demangleGenericSpecialization({})'.format(self.mangled.text))
         while not self.mangled.nextIf('_'):
             param = Node(Kind.GENERIC_SPECIALIZATION_PARAM)
             node = self.demangleType()
@@ -261,6 +358,7 @@ class OldDemangler():
         return specialization
 
     def demangleFunctionSignatureSpecialization(self, specialization):
+        print('demangleFunctionSignatureSpecialization({})'.format(self.mangled.text))
         param_count = 0
         while not self.mangled.nextIf('_'):
             param = Node(Kind.FUNCTION_SIGNATURE_SPECIALIZATION_PARAM, index=param_count)
@@ -306,6 +404,7 @@ class OldDemangler():
         return specialization
 
     def demangleProtocolConformance(self):
+        print('demangleProtocolConformance({})'.format(self.mangled.text))
         t = self.demangleType()
         if not t:
             return None
@@ -452,24 +551,25 @@ class OldDemangler():
         if self.mangled.nextIf('S'):
             return self.demangleSubstitutionIndex()
         if self.mangled.nextIf('V'):
-            return self.demangleDeclarationName(Node(Kind.STRUCTURE))
+            return self.demangleDeclarationName(Kind.STRUCTURE)
         if self.mangled.nextIf('O'):
-            return self.demangleDeclarationName(Node(Kind.ENUM))
+            return self.demangleDeclarationName(Kind.ENUM)
         if self.mangled.nextIf('C'):
-            return self.demangleDeclarationName(Node(Kind.CLASS))
+            return self.demangleDeclarationName(Kind.CLASS)
         if self.mangled.nextIf('P'):
-            return self.demangleDeclarationName(Node(Kind.PROTOCOL))
+            return self.demangleDeclarationName(Kind.PROTOCOL)
         return None
 
     def demangleBoundGenericArgs(self, nominal_type):
+        print('demangleBoundGenericArgs({})'.format(self.mangled.text))
         if nominal_type.getNumChildren() == 0:
             return None
 
         parent_or_module = nominal_type.getChild(0)
 
-        if (parent_or_module.kind != Kind.MODULE and
-            parent_or_module.kind != Kind.FUNCTION and
-            parent_or_module.kind != Kind.EXTENSION):
+        if (parent_or_module.kind != Kind.MODULE) and (parent_or_module.kind != Kind.FUNCTION) and (parent_or_module.kind != Kind.EXTENSION):
+            parent_or_module = self.demangleBoundGenericArgs(parent_or_module)
+
             result = Node(nominal_type.kind)
             result.addChild(parent_or_module)
             result.addChild(nominal_type.getChild(1))
@@ -505,6 +605,7 @@ class OldDemangler():
         return result
 
     def demangleSpecializedAttribute(self):
+        print('demangleSpecializedAttribute({})'.format(self.mangled.text))
         is_not_re_abstracted = False
         if self.mangled.nextIf('g') or (self.mangled.peek() == 'r'):
             is_not_re_abstracted = self.mangled.nextIf('r')
@@ -625,6 +726,7 @@ class OldDemangler():
         return False, natural
 
     def demangleIndexAsNode(self, kind=Node(Kind.NUMBER)):
+        print('demangleIndexAsNode({})'.format(self.mangled.text))
         success, index = self.demangleIndex(0)
         if not success:
             return None
@@ -689,6 +791,7 @@ class OldDemangler():
         return self.substitutions[index_sub]
 
     def demangleDeclarationName(self, kind):
+        print('demangleDeclarationName({})'.format(self.mangled.text))
         context = self.demangleContext()
         if not context:
             return None
@@ -704,6 +807,7 @@ class OldDemangler():
         return decl
 
     def demangleProtocolName(self):
+        print('demangleProtocolName({})'.format(self.mangled.text))
         proto = self.demangleProtocolNameImpl()
         if not proto:
             return None
@@ -713,6 +817,7 @@ class OldDemangler():
         return t
 
     def demangleProtocolNameGivenContext(self, context):
+        print('demangleProtocolNameGivenContext({})'.format(self.mangled.text))
         name = self.demangleDeclName()
         if not name:
             return None
@@ -724,6 +829,7 @@ class OldDemangler():
         return proto
 
     def demangleProtocolNameImpl(self):
+        print('demangleProtocolNameImpl({})'.format(self.mangled.text))
         if self.mangled.nextIf('S'):
             sub = self.demangleSubstitutionIndex()
             if not sub:
@@ -759,6 +865,7 @@ class OldDemangler():
         return module
 
     def demangleBoundGenericType(self):
+        print('demangleBoundGenericType({})'.format(self.mangled.text))
         nominal_type = self.demangleNominalType()
         if not nominal_type:
             return None
@@ -809,6 +916,7 @@ class OldDemangler():
         return self.demangleModule()
 
     def demangleProtocolList(self):
+        print('demangleProtocolList({})'.format(self.mangled.text))
         proto_list = Node(Kind.PROTOCOL_LIST)
         type_list = Node(Kind.TYPE_LIST)
         proto_list.addChild(type_list)
@@ -820,6 +928,7 @@ class OldDemangler():
         return proto_list
 
     def demangleTuple(self, is_v):
+        print('demangleTuple({})'.format(self.mangled.text))
         tuple =  Node(Kind.TUPLE)
         elt = None
         while not self.mangled.nextIf('_'):
@@ -1056,6 +1165,7 @@ class OldDemangler():
         return None
 
     def demangleReabstractSignature(self, signature):
+        print('demangleReabstractSignature({})'.format(self.mangled.text))
         if self.mangled.nextIf('G'):
             generics = self.demangleGenericSignature()
             if not generics:
@@ -1075,6 +1185,7 @@ class OldDemangler():
         return True, signature
 
     def getDependentGenericParamType(self, depth, index):
+        print('getDependentGenericParamType({})'.format(self.mangled.text))
         print_name = archetypeName(index, depth)
         param_ty = Node(Kind.DEPENDENT_GENERIC_PARAM_TYPE, print_name)
         param_ty.addChild(Node(Kind.INDEX, index=depth))
@@ -1082,6 +1193,7 @@ class OldDemangler():
         return param_ty
 
     def demangleGenericParamIndex(self):
+        print('demangleGenericParamIndex({})'.format(self.mangled.text))
         depth = 0
         index = 0
         if self.mangled.nextIf('d'):
@@ -1104,6 +1216,7 @@ class OldDemangler():
         return self.getDependentGenericParamType(depth, index)
 
     def demangleDependentMemberTypeName(self, base):
+        print('demangleDependentMemberTypeName({})'.format(self.mangled.text))
         if base.kind != Kind.TYPE:
             print('ERROR: demangleDependentMemberTypeName(base) base should be a type')
             return None
@@ -1136,6 +1249,7 @@ class OldDemangler():
         return dep_ty
 
     def demangleAssociatedTypeSimple(self):
+        print('demangleAssociatedTypeSimple({})'.format(self.mangled.text))
         base = self.demangleGenericParamIndex()
         if not base:
             return None
@@ -1145,6 +1259,7 @@ class OldDemangler():
         return self.demangleDependentMemberTypeName(node_type)
 
     def demangleAssociatedTypeCompound(self):
+        print('demangleAssociatedTypeCompound({})'.format(self.mangled.text))
         base = self.demangleGenericParamIndex()
         if not base:
             return None
@@ -1160,6 +1275,7 @@ class OldDemangler():
         return base
 
     def demangleConstrainedTypeImpl(self):
+        print('demangleConstrainedTypeImpl({})'.format(self.mangled.text))
         if self.mangled.nextIf('w'):
             return self.demangleAssociatedTypeSimple()
         if self.mangled.nextIf('W'):
@@ -1167,6 +1283,7 @@ class OldDemangler():
         return self.demangleGenericParamIndex()
 
     def demangleConstrainedType(self):
+        print('demangleConstrainedType({})'.format(self.mangled.text))
         t = self.demangleConstrainedTypeImpl()
         if not t:
             return None
@@ -1184,7 +1301,7 @@ class OldDemangler():
 
         addCount = lambda node, n: node.addChild(Node(Kind.DEPENDENT_GENERIC_PARAM_COUNT, index=n))
 
-        while (self.mangled.peek() != 'R') and (self.mangled.peek != 'r'):
+        while (self.mangled.peek() != 'R') and (self.mangled.peek() != 'r'):
             if self.mangled.nextIf('z'):
                 count = 0
                 addCount(sig, count)
