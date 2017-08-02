@@ -3,11 +3,15 @@ from enum import Enum
 
 from node import Node, Kind
 
+from printer import archetypeName
+
 MANGLING_MODULE_OBJC = '__ObjC'
 MANGLING_MODULE_C = '__C'
 STDLIB_NAME = 'Swift'
 
 IsVariadic = Enum('IsVariadic', 'YES NO')
+
+# typedef uint64_t IndexType
 
 class FunctionSigSpecializationParamKind():
     CONSTANT_PROP_FUNCTION = 0
@@ -582,12 +586,13 @@ class OldDemangler():
 
         return Node(kind, identifier)
 
-    def demangleIndex(self):
+    def demangleIndex(self, natural):
         print('demangleIndex({})'.format(self.mangled.text))
-        natural = 0
+        #natural = 0
         if self.mangled.nextIf('_'):
             natural = 0
             return True, natural
+
         success, natural = self.demangleNatural(natural)
         print('success={} natural={}'.format(success, natural))
         if success:
@@ -598,7 +603,7 @@ class OldDemangler():
         return False, natural
 
     def demangleIndexAsNode(self, kind=Node(Kind.NUMBER)):
-        success, index = self.demangleIndex()
+        success, index = self.demangleIndex(0)
         if not success:
             return None
         return Node(kind, index=index)
@@ -647,18 +652,13 @@ class OldDemangler():
         if self.mangled.nextIf('r'):
             return self.createSwiftType(Kind.STRUCTURE, 'UnsafeMutableBufferPointer')
         if self.mangled.nextIf('S'):
-            #ret = self.createSwiftType(Kind.STRUCTURE, 'String')
-            #print('createSwiftType(String)')
-            #if not ret:
-            #    print('createSwiftType returned None')
-            #return ret
             return self.createSwiftType(Kind.STRUCTURE, 'String')
         if self.mangled.nextIf('u'):
             return self.createSwiftType(Kind.STRUCTURE, 'UInt')
 
         print('demangleSubstitutionIndex made it past createSwiftType()')
         print('substitutions={}'.format(self.substitutions))
-        success, index_sub = self.demangleIndex()
+        success, index_sub = self.demangleIndex(0)
         print('success={} index_sub={}'.format(success, index_sub))
         if not success:
             return None
@@ -747,7 +747,7 @@ class OldDemangler():
         if not self.mangled:
             return None
         if self.mangled.nextIf('E'):
-            ext = Node(Kind.EXTENSIONS)
+            ext = Node(Kind.EXTENSION)
             def_module = self.demangleModule()
             if not def_module:
                 return None
@@ -759,13 +759,11 @@ class OldDemangler():
             return ext
 
         if self.mangled.nextIf('e'):
-            ext = Node(Kind.EXTENSIONS)
+            ext = Node(Kind.EXTENSION)
             def_module = self.demangleModule()
             if not def_module:
                 return None
-            print('TODO: implement demangleGenericSignature()')
-            return None
-            #sig = self.demangleGenericSignature()
+            sig = self.demangleGenericSignature()
             if not sig:
                 return None
             t = self.demangleContext()
@@ -835,7 +833,6 @@ class OldDemangler():
         print('demangleType({})'.format(self.mangled.text))
         t = self.demangleTypeImpl()
         if not t:
-            #print('demangleTypeImpl() returned None with suffix={}'.format(self.mangled.text))
             return None
         node_type = Node(Kind.TYPE)
         node_type.addChild(t)
@@ -975,8 +972,7 @@ class OldDemangler():
             print('TODO: implement demangleDependentType')
             return None
         if c == 'x':
-            print('TODO: implement demangleDependentGenericParamType')
-            return None
+            return self.getDependentGenericParamType(0, 0)
         if c == 'w':
             print('TODO: implement demangleAssociatedTypeSimple')
             return None
@@ -991,18 +987,22 @@ class OldDemangler():
             inout.addChild(t)
             return inout
         if c == 'S':
-            #ret = self.demangleSubstitutionIndex()
-            #if not ret:
-            #    print('demangleSubstitutionIndex() returned None with suffix={}'.format(self.mangled.text))
-            #return ret
             return self.demangleSubstitutionIndex()
         if c == 'T':
             return self.demangleTuple(IsVariadic.NO)
         if c == 't':
             return self.demangleTuple(IsVariadic.YES)
         if c == 'u':
-            print('TODO: implement demangleGenericSignature')
-            return None
+            sig = self.demangleGenericSignature()
+            if not sig:
+                return None
+            sub = self.demangleType()
+            if not sub:
+                return None
+            dependent_generic_type = Node(Kind.DEPENDENT_GENERIC_TYPE)
+            dependent_generic_type.addChild(sig)
+            dependent_generic_type.addChild(sub)
+            return dependent_generic_type
         if c == 'X':
             if self.mangled.nextIf('f'):
                 return self.demangleFunctionType(Kind.THIN_FUNCTION_TYPE)
@@ -1035,8 +1035,258 @@ class OldDemangler():
             return self.demangleDeclarationName(nominalTypeMarkerToNodeKind(c))
         return None
 
-#    def demangleGenericSignature(self):
-#    def demangleBoundGenericType(self):
+    def getDependentGenericParamType(self, depth, index):
+        print_name = archetypeName(index, depth)
+        param_ty = Node(Kind.DEPENDENT_GENERIC_PARAM_TYPE, print_name)
+        param_ty.addChild(Node(Kind.INDEX, index=depth))
+        param_ty.addChild(Node(Kind.INDEX, index=index))
+        return param_ty
+
+    def demangleGenericParamIndex(self):
+        depth = 0
+        index = 0
+        if self.mangled.nextIf('d'):
+            success, depth = self.demangleIndex(depth)
+            if not success:
+                return None
+            depth += 1
+            success, index = self.demangleIndex(index)
+            if not success:
+                return None
+        elif self.mangled.nextIf('x'):
+            depth = 0
+            index = 0
+        else:
+            success, index = self.demangleIndex(index)
+            if not success:
+                return None
+            depth = 0
+            index += 1
+        return self.getDependentGenericParamType(depth, index)
+
+    def demangleDependentMemberTypeName(self, base):
+        if base.kind != Kind.TYPE:
+            print('ERROR: demangleDependentMemberTypeName(base) base should be a type')
+            return None
+
+        assoc_ty = None
+        if self.mangled.nextIf('S'):
+            assoc_ty = self.demangleSubstitutionIndex()
+            if not assoc_ty:
+                return None
+            if assoc_ty.kind != Kind.DEPENDENT_ASSOCIATED_TYPE_REF:
+                return None
+        else:
+            protocol = None
+            if self.mangled.nextIf('P'):
+                protocol = self.demangleProtocolName()
+                if not protocol:
+                    return None
+
+            assoc_ty = self.demangleIdentifier(Kind.DEPENDENT_ASSOCIATED_TYPE_REF)
+            if not assoc_ty:
+                return None
+            if protocol:
+                assoc_ty.addChild(protocol)
+
+            self.substitutions.append(assoc_ty)
+
+        dep_ty = Node(Kind.DEPENDENT_MEMBER_TYPE)
+        dep_ty.addChild(base)
+        dep_ty.addChild(assoc_ty)
+        return dep_ty
+
+    def demangleAssociatedTypeSimple(self):
+        base = self.demangleGenericParamIndex()
+        if not base:
+            return None
+
+        node_type = Node(Kind.TYPE)
+        node_type.addChild(base)
+        return self.demangleDependentMemberTypeName(node_type)
+
+    def demangleAssociatedTypeCompound(self):
+        base = self.demangleGenericParamIndex()
+        if not base:
+            return None
+
+        while not self.mangled.nextIf('_'):
+            node_type = Node(Kind.TYPE)
+            node_type.addChild(base)
+
+            base = self.demangleDependentMemberTypeName(node_type)
+            if not base:
+                return None
+
+        return base
+
+    def demangleConstrainedTypeImpl(self):
+        if self.mangled.nextIf('w'):
+            return self.demangleAssociatedTypeSimple()
+        if self.mangled.nextIf('W'):
+            return self.demangleAssociatedTypeCompound()
+        return self.demangleGenericParamIndex()
+
+    def demangleConstrainedType(self):
+        t = self.demangleConstrainedTypeImpl()
+        if not t:
+            return None
+
+        node_type = Node(Kind.TYPE)
+        node_type.addChild(t)
+        return node_type
+
+    def demangleGenericSignature(self, is_pseudogeneric = False):
+        print('demangleGenericSignature({})'.format(self.mangled.text))
+        kind = Kind.DEPENDENT_PSEUDOGENERIC_SIGNATURE if is_pseudogeneric else Kind.DEPENDENT_GENERIC_SIGNATURE
+        sig = Node(kind)
+
+        count = (1<<64) - 1
+
+        addCount = lambda node, n: node.addChild(Node(Kind.DEPENDENT_GENERIC_PARAM_COUNT, index=n))
+
+        while (self.mangled.peek() != 'R') and (self.mangled.peek != 'r'):
+            if self.mangled.nextIf('z'):
+                count = 0
+                addCount(sig, count)
+                continue
+            success, count = self.demangleIndex(count)
+            if success:
+                count += 1
+            else:
+                return None
+            addCount(sig, count)
+
+        if count == ((1<<64) - 1):
+            count = 1
+            addCount(sig, count)
+
+        if self.mangled.nextIf('r'):
+            return sig
+
+        if not self.mangled.nextIf('R'):
+            return None
+
+        while not self.mangled.nextIf('r'):
+            reqt = self.demangleGenericRequirement()
+            if not reqt:
+                return None
+            sig.addChild(reqt)
+
+        return sig
+
+    def demangleGenericRequirement(self):
+        print('demangleGenericRequirement({})'.format(self.mangled.text))
+        constrained_type = self.demangleConstrainedType()
+        if not constrained_type:
+            return None
+        if self.mangled.nextIf('z'):
+            second = self.demangleType()
+            if not second:
+                return None
+            reqt = Node(Kind.DEPENDENT_GENERIC_SAME_TYPE_REQUIREMENT)
+            reqt.addChild(constrained_type)
+            reqt.addChild(second)
+            return reqt
+
+        if self.mangled.nextIf('l'):
+            size = -1
+            aligment = -1
+            if self.mangled.nextIf('U'):
+                kind = Kind.IDENTIFIER
+                name = 'U'
+            elif self.mangled.nextIf('R'):
+                kind = Kind.IDENTIFIER
+                name = 'R'
+            elif self.mangled.nextIf('N'):
+                kind = Kind.IDENTIFIER
+                name = 'N'
+            elif self.mangled.nextIf('T'):
+                kind = Kind.IDENTIFIER
+                name = 'T'
+            elif self.mangled.nextIf('E'):
+                kind = Kind.IDENTIFIER
+                success, size = self.demangleNatural(size)
+                if not success:
+                    return None
+                if not self.mangled.nextIf('_'):
+                    return None
+                success, alignment = self.demangleNatural(alignment)
+                if not success:
+                    return None
+                name = 'E'
+            elif self.mangled.nextIf('e'):
+                kind = Node(Kind.IDENTIFIER)
+                success, size = self.demangleNatural(size)
+                if not success:
+                    return None
+                name = 'e'
+            elif self.mangled.nextIf('M'):
+                kind = Node(Kind.IDENTIFIER)
+                success, size = self.demangleNatural(size)
+                if not success:
+                    return None
+                if not self.mangled.nextIf('_'):
+                    return None
+                success, alignment = self.demangleNatural(alignment)
+                if not success:
+                    return None
+                name = 'M'
+            elif self.mangled.nextIf('m'):
+                kind = Node(Kind.IDENTIFIER)
+                success, size = self.demangleNatural(size)
+                if not success:
+                    return None
+                name = 'm'
+            else:
+                return None
+
+            second = Node(kind, text=name)
+            if not second:
+                return None
+            reqt = Node(Kind.DEPENDENT_GENERIC_LAYOUT_REQUIREMENT)
+            reqt.addChild(constrained_type)
+            reqt.addChild(second)
+            if size != -1:
+                reqt.addChild(Node(Kind.NUMBER, index=size))
+                if alignment != -1:
+                    reqt.addChild(Node(Kind.NUMBER, index=alignment))
+            return reqt
+
+        if not self.mangled:
+            return None
+
+        constraint = None
+        next = self.mangled.peek()
+
+        if next == 'C':
+            constraint = self.demangleType()
+            if not constraint:
+                return None
+        elif next == 'S':
+            type_name = None
+            self.mangled.next()
+            sub = self.demangleSubstitutionIndex()
+            if not sub:
+                return None
+            if (sub.kind == Kind.PROTOCOL) or (sub.kind == Kind.CLASS):
+                type_name = sub
+            elif sub.kind == Kind.MODULE:
+                type_name = self.demangleProtocolNameGiveContext()
+                if not type_name:
+                    return None
+            else:
+                return None
+            constraint = Node(Kind.TYPE)
+            constraint.addChild(type_name)
+        else:
+            constraint = self.demangleProtocolName()
+            if not constraint:
+                return None
+        reqt = Node(Kind.DEPENDENT_GENERIC_CONFORMANCE_REQUIREMENT)
+        reqt.addChild(constrained_type)
+        reqt.addChild(constraint)
+        return reqt
 
 def isStartOfIdentifier(c):
     if c in string.digits:
@@ -1065,4 +1315,3 @@ def nominalTypeMarkerToNodeKind(c):
 def demangleOldSymbolAsNode(s):
     demangler = OldDemangler(s)
     return demangler.demangleTopLevel()
-

@@ -55,7 +55,7 @@ def demangleImportsInFunction(bv, f):
                     result = demangler.demangleSymbolAsNode(bv, name)
                     if not result:
                         skipped.append(symbol.name)
-                        print('Skipping {}'.format(symbol.name))
+                        print('SKIPPING: {}'.format(symbol.name))
                         continue
                     successful.append(symbol.name)
                     print(result)
