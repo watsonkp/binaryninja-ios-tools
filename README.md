@@ -1,7 +1,7 @@
-# Objective-C and Swift Tools (v0.1)
+# iOS Tools (v0.1)
 Author: **Kevin Watson**
 
-_A collection of helper functions for reversing Mach-O files compiled from Objective-C and/or Swift_
+_A collection of helper functions for reversing iOS Mach-O files_
 
 ## Description:
 

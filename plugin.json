@@ -1,9 +1,9 @@
 {
 	"plugin": {
-		"name": "Objective-C and Swift Tools",
+		"name": "iOS Tools",
 		"type": ["core", "ui", "architecture", "binaryview"],
 		"api": "python2",
-		"description": "A collection of helper functions for reversing Mach-O files compiled from Objective-C and/or Swift",
+		"description": "A collection of helper functions for reversing iOS Mach-O files",
 		"longdescription": "This plugin is currently a partially completed mess. Needed to make the first commit at some point.\n\nCan automatically parse class structures and rename function symbols to use their method names.\nUsing the Objective-C runtime implementation at https://opensource.apple.com/source/objc4/objc4-709/ as a reference.\n\nCan demangle imported Swift symbols and comment their occurences in a function.\nUsing the Swift demangler implementation at https://github.com/apple/swift/ as a reference.\n\n",
 		"license": {
 			"name": "MIT",
